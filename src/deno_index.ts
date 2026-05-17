@@ -13,6 +13,21 @@ const getContentType = (path: string): string => {
   return types[ext] || 'text/plain';
 };
 
+// 添加CORS响应头处理函数
+function addCORSHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Origin', '*');
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  headers.set('Access-Control-Max-Age', '86400');
+  
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 async function handleWebSocket(req: Request): Promise<Response> {
   const { socket: clientWs, response } = Deno.upgradeWebSocket(req);
   
@@ -87,16 +102,36 @@ async function handleAPIRequest(req: Request): Promise<Response> {
 async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   console.log('Request URL:', req.url);
+  console.log('Request Method:', req.method);
+  console.log('Request Path:', url.pathname);
+
+  // 处理 OPTIONS 预检请求（CORS）
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Max-Age': '86400'
+      }
+    });
+  }
 
   // WebSocket 处理
   if (req.headers.get("Upgrade")?.toLowerCase() === "websocket") {
     return handleWebSocket(req);
   }
 
-  if (url.pathname.endsWith("/chat/completions") ||
+  // 修改：支持 Google Gemini API 路径
+  // 包括 /v1beta/models/... 和 /v1/... 路径
+  if (url.pathname.startsWith("/v1beta/") ||
+      url.pathname.startsWith("/v1/") ||
+      url.pathname.endsWith("/chat/completions") ||
       url.pathname.endsWith("/embeddings") ||
       url.pathname.endsWith("/models")) {
-    return handleAPIRequest(req);
+    const response = await handleAPIRequest(req);
+    return addCORSHeaders(response);
   }
 
   // 静态文件处理
@@ -114,6 +149,7 @@ async function handleRequest(req: Request): Promise<Response> {
     return new Response(file, {
       headers: {
         'content-type': `${contentType};charset=UTF-8`,
+        'Access-Control-Allow-Origin': '*'
       },
     });
   } catch (e) {
@@ -122,9 +158,10 @@ async function handleRequest(req: Request): Promise<Response> {
       status: 404,
       headers: {
         'content-type': 'text/plain;charset=UTF-8',
+        'Access-Control-Allow-Origin': '*'
       }
     });
   }
 }
 
-Deno.serve(handleRequest); 
+Deno.serve(handleRequest);
