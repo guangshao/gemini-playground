@@ -129,7 +129,8 @@ async function handleRequest(req: Request): Promise<Response> {
       url.pathname.startsWith("/v1/") ||
       url.pathname.endsWith("/chat/completions") ||
       url.pathname.endsWith("/embeddings") ||
-      url.pathname.endsWith("/models")) {
+      url.pathname.endsWith("/models") ||
+      url.pathname.endsWith("/images/generations")) {
     const response = await handleAPIRequest(req);
     return addCORSHeaders(response);
   }
