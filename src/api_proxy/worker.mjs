@@ -41,7 +41,7 @@ export default {
           return handleGeminiNativeRequest(request, pathname, search, apiKey)
             .catch(errHandler);
         // 添加 OpenAI 兼容的图像生成接口
-        case pathname.endsWith("/images/generations"):
+        case pathname === "/v1/images/generations" || pathname === "/images/generations":
           assert(request.method === "POST");
           return handleImageGenerations(await request.json(), apiKey)
             .catch(errHandler);
