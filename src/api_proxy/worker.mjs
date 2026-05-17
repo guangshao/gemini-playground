@@ -21,7 +21,7 @@ export default {
           throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
         }
       };
-      const { pathname } = new URL(request.url);
+      const { pathname, search } = new URL(request.url);
       switch (true) {
         case pathname.endsWith("/chat/completions"):
           assert(request.method === "POST");
@@ -34,6 +34,11 @@ export default {
         case pathname.endsWith("/models"):
           assert(request.method === "GET");
           return handleModels(apiKey)
+            .catch(errHandler);
+        // 添加对 Google Gemini 原生 API 路径的支持
+        case pathname.includes("/v1beta/models/") && pathname.includes(":"):
+          assert(request.method === "POST" || request.method === "GET");
+          return handleGeminiNativeRequest(request, pathname, search, apiKey)
             .catch(errHandler);
         default:
           throw new HttpError("404 Not Found", 404);
@@ -453,4 +458,25 @@ async function toOpenAiStreamFlush (controller) {
     }
     controller.enqueue("data: [DONE]" + delimiter);
   }
+}
+
+// 处理 Google Gemini 原生 API 请求
+async function handleGeminiNativeRequest(request, pathname, search, apiKey) {
+  const url = `${BASE_URL}${pathname}${search}`;
+  
+  // 构建请求头
+  const headers = makeHeaders(apiKey);
+  if (request.method === "POST") {
+    headers["Content-Type"] = "application/json";
+  }
+  
+  // 转发请求到 Google Gemini API
+  const response = await fetch(url, {
+    method: request.method,
+    headers,
+    body: request.method === "POST" ? await request.text() : undefined
+  });
+  
+  // 返回响应并添加CORS头
+  return new Response(response.body, fixCors(response));
 }
