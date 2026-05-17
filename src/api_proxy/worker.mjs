@@ -40,6 +40,11 @@ export default {
           assert(request.method === "POST" || request.method === "GET");
           return handleGeminiNativeRequest(request, pathname, search, apiKey)
             .catch(errHandler);
+        // 添加 OpenAI 兼容的图像生成接口
+        case pathname.endsWith("/images/generations"):
+          assert(request.method === "POST");
+          return handleImageGenerations(await request.json(), apiKey)
+            .catch(errHandler);
         default:
           throw new HttpError("404 Not Found", 404);
       }
@@ -461,7 +466,7 @@ async function toOpenAiStreamFlush (controller) {
 }
 
 // 处理 Google Gemini 原生 API 请求
-async function handleGeminiNativeRequest(request, pathname, search, apiKey) {
+async function handleGeminiNativeRequest(request, pathname, search, apiKey){
   const url = `${BASE_URL}${pathname}${search}`;
   
   // 构建请求头
@@ -479,4 +484,64 @@ async function handleGeminiNativeRequest(request, pathname, search, apiKey) {
   
   // 返回响应并添加CORS头
   return new Response(response.body, fixCors(response));
+}
+
+// 处理图像生成请求 (OpenAI 兼容格式)
+const DEFAULT_IMAGE_MODEL = "imagen-3.0-generate-002";
+async function handleImageGenerations(req, apiKey) {
+  // 获取模型名称
+  let model = DEFAULT_IMAGE_MODEL;
+  if (typeof req.model === "string") {
+    if (req.model.startsWith("models/")) {
+      model = req.model.substring(7);
+    } else if (req.model.startsWith("imagen-")) {
+      model = req.model;
+    }
+  }
+
+  // 构建 Gemini Imagen API 请求
+  const url = `${BASE_URL}/${API_VERSION}/models/${model}:predict`;
+  
+  // 解析尺寸
+  let aspectRatio = "1:1";
+  if (req.size) {
+    const sizeMap = {
+      "1024x1024": "1:1",
+      "1024x1536": "2:3",
+      "1536x1024": "3:2",
+      "1024x576": "16:9",
+      "576x1024": "9:16"
+    };
+    aspectRatio = sizeMap[req.size] || "1:1";
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      instances: [{ prompt: req.prompt }],
+      parameters: {
+        sampleCount: req.n || 1,
+        aspectRatio: aspectRatio,
+        ...(req.quality === "hd" && { enhancePrompt: true })
+      }
+    })
+  });
+
+  let { body } = response;
+  if (response.ok) {
+    const data = JSON.parse(await response.text());
+    // 转换为 OpenAI 格式
+    const images = data.predictions?.map((pred, index) => ({
+      b64_json: pred.bytesBase64Encoded,
+      revised_prompt: req.prompt
+    })) || [];
+
+    body = JSON.stringify({
+      created: Math.floor(Date.now() / 1000),
+      data: images
+    }, null, "  ");
+  }
+
+  return new Response(body, fixCors(response));
 }
